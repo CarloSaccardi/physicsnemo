@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2023 - 2025 NVIDIA CORPORATION & AFFILIATES.
+# SPDX-FileCopyrightText: Copyright (c) 2023 - 2024 NVIDIA CORPORATION & AFFILIATES.
 # SPDX-FileCopyrightText: All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -15,19 +15,17 @@
 # limitations under the License.
 
 """
-Preconditioning schemes used in the paper"Elucidating the Design Space of
+Preconditioning schemes used in the paper"Elucidating the Design Space of 
 Diffusion-Based Generative Models".
 """
 
 import importlib
-import warnings
 from dataclasses import dataclass
-from typing import Any, List, Literal, Tuple, Union
+from typing import List, Literal, Tuple, Union
 
 import numpy as np
 import torch
 
-from physicsnemo.models.diffusion.utils import _wrapped_property
 from physicsnemo.models.meta import ModelMetaData
 from physicsnemo.models.module import Module
 
@@ -722,7 +720,7 @@ class EDMPrecondSuperResolution(Module):
     Parameters
     ----------
     img_resolution : Union[int, Tuple[int, int]]
-        Spatial resolution :math:`(H, W)` of the image. If a single int is provided,
+        Spatial resolution `(H, W)` of the image. If a single int is provided,
         the image is assumed to be square.
     img_in_channels : int
         Number of input channels in the low-resolution input image.
@@ -766,25 +764,6 @@ class EDMPrecondSuperResolution(Module):
     arXiv preprint arXiv:2309.15214.
     """
 
-    # Classes that can be wrapped by this UNet class.
-    _wrapped_classes = {
-        "SongUNetPosEmbd",
-        "SongUNetPosLtEmbd",
-        "SongUNet",
-        "DhariwalUNet",
-    }
-
-    # Arguments of the __init__ method that can be overridden with the
-    # ``Module.from_checkpoint`` method. Here, since we use splatted arguments
-    # for the wrapped model instance, we allow overriding of any overridable
-    # argument of the wrapped classes.
-    _overridable_args = set.union(
-        *(
-            getattr(getattr(network_module, cls_name), "_overridable_args", set())
-            for cls_name in _wrapped_classes
-        )
-    )
-
     def __init__(
         self,
         img_resolution: Union[int, Tuple[int, int]],
@@ -797,20 +776,13 @@ class EDMPrecondSuperResolution(Module):
         sigma_data: float = 0.5,
         sigma_min=0.0,
         sigma_max=float("inf"),
-        **model_kwargs: Any,
+        **model_kwargs: dict,
     ):
         super().__init__(meta=EDMPrecondSuperResolutionMetaData)
-
-        # Validation
-        if model_type not in self._wrapped_classes:
-            raise ValueError(
-                f"Model type '{model_type}' is not supported. "
-                f"Must be one of: {', '.join(self._wrapped_classes)}"
-            )
-
         self.img_resolution = img_resolution
         self.img_in_channels = img_in_channels
         self.img_out_channels = img_out_channels
+        self.use_fp16 = use_fp16
         self.sigma_data = sigma_data
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
@@ -823,45 +795,6 @@ class EDMPrecondSuperResolution(Module):
             **model_kwargs,
         )  # TODO needs better handling
         self.scaling_fn = self._scaling_fn
-        self.use_fp16 = use_fp16
-
-    @property
-    def use_fp16(self):
-        """
-        bool: Whether the model uses float16 precision.
-
-        Returns
-        -------
-        bool
-            True if the model is in float16 mode, False otherwise.
-        """
-        return self._use_fp16
-
-    @use_fp16.setter
-    def use_fp16(self, value: bool):
-        """
-        Set whether the model should use float16 precision.
-
-        Parameters
-        ----------
-        value : bool
-            If True, moves the model to torch.float16. If False, moves to torch.float32.
-
-        Raises
-        ------
-        ValueError
-            If `value` is not a boolean.
-        """
-        # NOTE: allow 0/1 values for older checkpoints
-        if not (isinstance(value, bool) or value in [0, 1]):
-            raise ValueError(
-                f"`use_fp16` must be a boolean, but got {type(value).__name__}."
-            )
-        self._use_fp16 = value
-        if value:
-            self.to(torch.float16)
-        else:
-            self.to(torch.float32)
 
     @staticmethod
     def _scaling_fn(
@@ -887,25 +820,13 @@ class EDMPrecondSuperResolution(Module):
         """
         return torch.cat([c_in * x, img_lr.to(x.dtype)], dim=1)
 
-    # Properties delegated to the wrapped model
-    amp_mode = _wrapped_property(
-        "amp_mode",
-        "model",
-        "Set to ``True`` when using automatic mixed precision.",
-    )
-    profile_mode = _wrapped_property(
-        "profile_mode",
-        "model",
-        "Set to ``True`` to enable profiling of the wrapped model.",
-    )
-
     def forward(
         self,
         x: torch.Tensor,
         img_lr: torch.Tensor,
         sigma: torch.Tensor,
         force_fp32: bool = False,
-        **model_kwargs: Any,
+        **model_kwargs: dict,
     ) -> torch.Tensor:
         """
         Forward pass of the EDMPrecondSuperResolution model wrapper.
@@ -995,184 +916,6 @@ class EDMPrecondSuperResolution(Module):
         EDMPrecond.round_sigma
         """
         return EDMPrecond.round_sigma(sigma)
-
-
-# NOTE: This is a deprecated version of the EDMPrecondSuperResolution model.
-# This was used to maintain backwards compatibility and allow loading old models.
-@dataclass
-class EDMPrecondSRMetaData(ModelMetaData):
-    """EDMPrecondSR meta data"""
-
-    name: str = "EDMPrecondSR"
-    # Optimization
-    jit: bool = False
-    cuda_graphs: bool = False
-    amp_cpu: bool = False
-    amp_gpu: bool = True
-    torch_fx: bool = False
-    # Data type
-    bf16: bool = False
-    # Inference
-    onnx: bool = False
-    # Physics informed
-    func_torch: bool = False
-    auto_grad: bool = False
-
-
-class EDMPrecondSR(EDMPrecondSuperResolution):
-    """
-    NOTE: This is a deprecated version of the EDMPrecondSuperResolution model.
-    This was used to maintain backwards compatibility and allow loading old models.
-    Please use the EDMPrecondSuperResolution model instead.
-
-    Improved preconditioning proposed in the paper "Elucidating the Design Space of
-    Diffusion-Based Generative Models" (EDM) for super-resolution tasks
-
-    Parameters
-    ----------
-    img_resolution : int
-        Image resolution.
-    img_channels : int
-        Number of color channels (deprecated, not used).
-    img_in_channels : int
-        Number of input color channels.
-    img_out_channels : int
-        Number of output color channels.
-    use_fp16 : bool
-        Execute the underlying model at FP16 precision?, by default False.
-    sigma_min : float
-        Minimum supported noise level, by default 0.0.
-    sigma_max : float
-        Maximum supported noise level, by default inf.
-    sigma_data : float
-        Expected standard deviation of the training data, by default 0.5.
-    model_type :str
-        Class name of the underlying model, by default "SongUNetPosEmbd".
-    scale_cond_input : bool
-        Whether to scale the conditional input (deprecated), by default True.
-    **model_kwargs : dict
-        Keyword arguments for the underlying model.
-
-    Note
-    ----
-    References:
-    - Karras, T., Aittala, M., Aila, T. and Laine, S., 2022. Elucidating the
-    design space of diffusion-based generative models. Advances in Neural Information
-    Processing Systems, 35, pp.26565-26577.
-    - Mardani, M., Brenowitz, N., Cohen, Y., Pathak, J., Chen, C.Y.,
-    Liu, C.C.,Vahdat, A., Kashinath, K., Kautz, J. and Pritchard, M., 2023.
-    Generative Residual Diffusion Modeling for Km-scale Atmospheric Downscaling.
-    arXiv preprint arXiv:2309.15214.
-    """
-
-    def __init__(
-        self,
-        img_resolution,
-        img_channels,  # deprecated
-        img_in_channels,
-        img_out_channels,
-        use_fp16=False,
-        sigma_min=0.0,
-        sigma_max=float("inf"),
-        sigma_data=0.5,
-        model_type="SongUNetPosEmbd",
-        scale_cond_input=True,  # deprecated
-        **model_kwargs,
-    ):
-        warnings.warn(
-            "EDMPrecondSR is deprecated and will be removed in a future version. "
-            "Please use EDMPrecondSuperResolution instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-
-        super().__init__(
-            img_resolution=img_resolution,
-            img_in_channels=img_in_channels,
-            img_out_channels=img_out_channels,
-            use_fp16=use_fp16,
-            sigma_min=sigma_min,
-            sigma_max=sigma_max,
-            sigma_data=sigma_data,
-            model_type=model_type,
-            **model_kwargs,
-        )
-
-        if scale_cond_input:
-            warnings.warn(
-                "The `scale_cond_input=True` option does not properly scale the conditional input "
-                "and is deprecated. It is highly recommended to set `scale_cond_input=False`. "
-                "However, for loading a checkpoint previously trained with `scale_cond_input=True`, "
-                "this flag must be set to `True` to ensure compatibility. "
-                "For more details, see https://github.com/NVIDIA/modulus/issues/229.",
-                DeprecationWarning,
-            )
-            self.scaling_fn = self._legacy_scaling_fn
-
-        # Store deprecated parameters for backward compatibility
-        self.img_channels = img_channels
-        self.scale_cond_input = scale_cond_input
-
-    @staticmethod
-    def _legacy_scaling_fn(
-        x: torch.Tensor, img_lr: torch.Tensor, c_in: torch.Tensor
-    ) -> torch.Tensor:
-        """
-        This function does not properly scale the conditional input
-        (see https://github.com/NVIDIA/modulus/issues/229)
-        and will be deprecated.
-
-        Concatenate and scale the high-resolution and low-resolution tensors.
-
-        Parameters
-        ----------
-        x : torch.Tensor
-            Noisy high-resolution image of shape (B, C_hr, H, W).
-        img_lr : torch.Tensor
-            Low-resolution image of shape (B, C_lr, H, W).
-        c_in : torch.Tensor
-            Scaling factor of shape (B, 1, 1, 1).
-
-        Returns
-        -------
-        torch.Tensor
-            Scaled and concatenated tensor of shape (B, C_in+C_out, H, W).
-        """
-        return c_in * torch.cat([x, img_lr.to(x.dtype)], dim=1)
-
-    def forward(
-        self,
-        x,
-        img_lr,
-        sigma,
-        force_fp32=False,
-        **model_kwargs,
-    ):
-        """
-        Forward pass of the EDMPrecondSR model wrapper.
-
-        Parameters
-        ----------
-        x : torch.Tensor
-            Noisy high-resolution image of shape (B, C_hr, H, W).
-        img_lr : torch.Tensor
-            Low-resolution conditioning image of shape (B, C_lr, H, W).
-        sigma : torch.Tensor
-            Noise level of shape (B) or (B, 1) or (B, 1, 1, 1).
-        force_fp32 : bool, optional
-            Whether to force FP32 precision regardless of the `use_fp16` attribute,
-            by default False.
-        **model_kwargs : dict
-            Additional keyword arguments to pass to the underlying model.
-
-        Returns
-        -------
-        torch.Tensor
-            Denoised high-resolution image of shape (B, C_hr, H, W).
-        """
-        return super().forward(
-            x=x, img_lr=img_lr, sigma=sigma, force_fp32=force_fp32, **model_kwargs
-        )
 
 
 class VEPrecond_dfsr(torch.nn.Module):

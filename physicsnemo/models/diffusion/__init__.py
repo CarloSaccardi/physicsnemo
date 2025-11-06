@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2023 - 2025 NVIDIA CORPORATION & AFFILIATES.
+# SPDX-FileCopyrightText: Copyright (c) 2023 - 2024 NVIDIA CORPORATION & AFFILIATES.
 # SPDX-FileCopyrightText: All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -20,18 +20,18 @@ from .layers import (
     Conv2d,
     FourierEmbedding,
     GroupNorm,
-    get_group_norm,
     Linear,
     PositionalEmbedding,
     UNetBlock,
+    UNetBlockNoise,
+    ConditionalGroupNorm,
 )
-from .song_unet import SongUNet, SongUNetPosEmbd, SongUNetPosLtEmbd
+from .song_unet import SongUNet, SongUNetPosEmbd, SongUNetPosLtEmbd, SongUNetCarlo, SongUNetPosEmbdCarlo
 from .dhariwal_unet import DhariwalUNet
 from .unet import UNet, StormCastUNet
 from .preconditioning import (
     EDMPrecond,
     EDMPrecondSuperResolution,
-    EDMPrecondSR,
     VEPrecond,
     VPPrecond,
     iDDPMPrecond,
